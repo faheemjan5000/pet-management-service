@@ -25,7 +25,7 @@ public class PetService {
     }
 
     public PetResponseDto addPet(PetRequestDto petDto)  {
-        log.info("PetService.savePet() - Saving pet: {}", petDto);
+        log.info("PetService.addPet() - Saving pet: {}", petDto);
         Pet petSaved = petRepository.save(petMapper.petDtoRequestToEntity(petDto));
         log.info("Pet Saved successfully - {}",petSaved);
         return petMapper.entityToPetResponseDto(petSaved);
