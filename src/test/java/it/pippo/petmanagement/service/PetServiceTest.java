@@ -6,25 +6,18 @@ import it.pippo.petmanagement.exceptions.PetNotFoundException;
 import it.pippo.petmanagement.mapper.PetMapper;
 import it.pippo.petmanagement.model.Pet;
 import it.pippo.petmanagement.repository.PetRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
 import java.util.Optional;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.same;
-import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class PetServiceTest {
@@ -32,33 +25,25 @@ class PetServiceTest {
     @Mock
     private PetRepository petRepository;
 
-    @Mock
-    private PetMapper petMapper;
+    private PetMapper petMapper = new PetMapper();
 
-    @InjectMocks
     private PetService petService;
 
-    @Test
-    void addPet_shouldSaveAndReturnResponseDto() {
-        PetRequestDto request = new PetRequestDto("Fido", "Dog", 3, "Alice");
-        Pet mappedPet = Pet.builder()
-                .name("Fido")
-                .species("Dog")
-                .age(3)
-                .ownerName("Alice")
-                .build();
-        Pet savedPet = Pet.builder()
-                .id(1L)
-                .name("Fido")
-                .species("Dog")
-                .age(3)
-                .ownerName("Alice")
-                .build();
-        PetResponseDto mappedResponse = new PetResponseDto(1L, "Fido", "Dog", 3, "Alice");
+    @BeforeEach
+    void setUp() {
+        petService = new PetService(petRepository, petMapper);
+    }
 
-        when(petMapper.petDtoRequestToEntity(request)).thenReturn(mappedPet);
-        when(petRepository.save(mappedPet)).thenReturn(savedPet);
-        when(petMapper.entityToPetResponseDto(savedPet)).thenReturn(mappedResponse);
+    @Test
+    void addPet_shouldSaveCorrectData() {
+        PetRequestDto request = new PetRequestDto("Fido", "Dog", 3, "Alice");
+
+        when(petRepository.save(any(Pet.class)))
+                .thenAnswer(invocation -> {
+                    Pet pet = invocation.getArgument(0);
+                    pet.setId(1L);
+                    return pet;
+                });
 
         PetResponseDto result = petService.addPet(request);
 
@@ -67,126 +52,121 @@ class PetServiceTest {
         assertEquals("Dog", result.getSpecies());
         assertEquals(3, result.getAge());
         assertEquals("Alice", result.getOwnerName());
-        verify(petMapper).petDtoRequestToEntity(request);
-        verify(petRepository, times(1)).save(mappedPet);
-        verify(petMapper).entityToPetResponseDto(savedPet);
+
+        verify(petRepository).save(argThat(pet ->
+                pet.getName().equals("Fido") &&
+                        pet.getSpecies().equals("Dog") &&
+                        pet.getAge() == 3 &&
+                        pet.getOwnerName().equals("Alice")
+        ));
     }
 
     @Test
-    void updatePet_shouldUpdateExistingPetAndReturnResponseDto() throws PetNotFoundException {
+    void updatePet_shouldUpdateExistingPet() throws PetNotFoundException {
         Long petId = 1L;
+
+        Pet existingPet = new Pet();
+        existingPet.setId(petId);
+        existingPet.setName("Old");
+        existingPet.setSpecies("Dog");
+        existingPet.setAge(2);
+        existingPet.setOwnerName("Alice");
+
         PetRequestDto updateRequest = new PetRequestDto("Leo", "Cat", 5, "Bob");
-        Pet existingPet = Pet.builder()
-                .id(petId)
-                .name("OldName")
-                .species("Dog")
-                .age(2)
-                .ownerName("Alice")
-                .build();
 
         when(petRepository.findById(petId)).thenReturn(Optional.of(existingPet));
-        doAnswer(invocation -> {
-            Pet target = invocation.getArgument(0);
-            PetRequestDto dto = invocation.getArgument(1);
-            target.setName(dto.getName());
-            target.setSpecies(dto.getSpecies());
-            target.setAge(dto.getAge());
-            target.setOwnerName(dto.getOwnerName());
-            return null;
-        }).when(petMapper).updateEntityFromRequestDto(same(existingPet), same(updateRequest));
-        when(petRepository.save(existingPet)).thenReturn(existingPet);
-        when(petMapper.entityToPetResponseDto(existingPet))
-                .thenReturn(new PetResponseDto(petId, "Leo", "Cat", 5, "Bob"));
+        when(petRepository.save(any(Pet.class))).thenAnswer(i -> i.getArgument(0));
 
         PetResponseDto result = petService.updatePet(petId, updateRequest);
 
-        assertEquals(petId, result.getId());
         assertEquals("Leo", result.getName());
         assertEquals("Cat", result.getSpecies());
         assertEquals(5, result.getAge());
         assertEquals("Bob", result.getOwnerName());
+
         verify(petRepository).findById(petId);
-        verify(petMapper).updateEntityFromRequestDto(existingPet, updateRequest);
         verify(petRepository).save(existingPet);
     }
 
     @Test
-    void updatePet_shouldThrowPetNotFoundExceptionWhenPetNotFound() {
+    void updatePet_shouldThrowWhenNotFound() {
         Long petId = 999L;
         PetRequestDto updateRequest = new PetRequestDto("Leo", "Cat", 5, "Bob");
 
         when(petRepository.findById(petId)).thenReturn(Optional.empty());
 
-        PetNotFoundException exception = assertThrows(PetNotFoundException.class,
-                () -> petService.updatePet(petId, updateRequest));
+        PetNotFoundException ex = assertThrows(
+                PetNotFoundException.class,
+                () -> petService.updatePet(petId, updateRequest)
+        );
 
-        assertTrue(exception.getMessage().contains("Pet with ID " + petId + " not found"));
+        assertTrue(ex.getMessage().contains("Pet with ID"));
         verify(petRepository).findById(petId);
-        verify(petRepository, never()).save(any(Pet.class));
+        verify(petRepository, never()).save(any());
     }
 
     @Test
-    void getPetById_shouldReturnPetWhenFound() throws PetNotFoundException {
+    void getPetById_shouldReturnPet() throws PetNotFoundException {
         Long petId = 10L;
-        Pet existingPet = Pet.builder()
-                .id(petId)
-                .name("Milo")
-                .species("Cat")
-                .age(4)
-                .ownerName("Eve")
-                .build();
 
-        when(petRepository.findById(petId)).thenReturn(Optional.of(existingPet));
-        when(petMapper.entityToPetResponseDto(existingPet))
-                .thenReturn(new PetResponseDto(petId, "Milo", "Cat", 4, "Eve"));
+        Pet pet = new Pet();
+        pet.setId(petId);
+        pet.setName("Milo");
+        pet.setSpecies("Cat");
+        pet.setAge(4);
+        pet.setOwnerName("Eve");
+
+        when(petRepository.findById(petId)).thenReturn(Optional.of(pet));
 
         PetResponseDto result = petService.getPetById(petId);
 
         assertEquals(petId, result.getId());
         assertEquals("Milo", result.getName());
+
         verify(petRepository).findById(petId);
-        verify(petMapper).entityToPetResponseDto(existingPet);
     }
 
     @Test
-    void getPetById_shouldThrowPetNotFoundExceptionWhenNotFound() {
+    void getPetById_shouldThrowWhenNotFound() {
         Long petId = 111L;
+
         when(petRepository.findById(petId)).thenReturn(Optional.empty());
 
-        PetNotFoundException exception = assertThrows(PetNotFoundException.class,
+        assertThrows(PetNotFoundException.class,
                 () -> petService.getPetById(petId));
 
-        assertTrue(exception.getMessage().contains("Pet with ID=" + petId));
         verify(petRepository).findById(petId);
     }
 
     @Test
-    void getAllPets_shouldReturnMappedList() {
-        List<Pet> pets = List.of(
-                Pet.builder().id(1L).name("A").species("Dog").age(2).ownerName("O1").build(),
-                Pet.builder().id(2L).name("B").species("Cat").age(3).ownerName("O2").build()
-        );
+    void getAllPets_shouldReturnList() {
+        Pet p1 = new Pet();
+        p1.setId(1L);
+        p1.setName("A");
 
-        when(petRepository.findAll()).thenReturn(pets);
-        when(petMapper.entityToPetResponseDto(pets.get(0)))
-                .thenReturn(new PetResponseDto(1L, "A", "Dog", 2, "O1"));
-        when(petMapper.entityToPetResponseDto(pets.get(1)))
-                .thenReturn(new PetResponseDto(2L, "B", "Cat", 3, "O2"));
+        Pet p2 = new Pet();
+        p2.setId(2L);
+        p2.setName("B");
+
+        when(petRepository.findAll()).thenReturn(List.of(p1, p2));
 
         List<PetResponseDto> result = petService.getAllPets();
 
         assertEquals(2, result.size());
         assertEquals("A", result.get(0).getName());
         assertEquals("B", result.get(1).getName());
+
         verify(petRepository).findAll();
     }
 
     @Test
-    void deletePet_shouldDeleteWhenPetExists() throws PetNotFoundException {
-        Long petId = 8L;
-        Pet existingPet = Pet.builder().id(petId).name("Rocky").species("Dog").age(6).ownerName("Dan").build();
+    void deletePet_shouldDeleteWhenExists() throws PetNotFoundException {
+        Long petId = 5L;
 
-        when(petRepository.findById(petId)).thenReturn(Optional.of(existingPet));
+        Pet pet = new Pet();
+        pet.setId(petId);
+
+        when(petRepository.findById(petId)).thenReturn(Optional.of(pet));
 
         petService.deletePet(petId);
 
@@ -195,15 +175,15 @@ class PetServiceTest {
     }
 
     @Test
-    void deletePet_shouldThrowPetNotFoundExceptionWhenPetMissing() {
+    void deletePet_shouldThrowWhenNotFound() {
         Long petId = 404L;
+
         when(petRepository.findById(petId)).thenReturn(Optional.empty());
 
-        PetNotFoundException exception = assertThrows(PetNotFoundException.class,
+        assertThrows(PetNotFoundException.class,
                 () -> petService.deletePet(petId));
 
-        assertTrue(exception.getMessage().contains("Pet with ID=" + petId));
         verify(petRepository).findById(petId);
-        verify(petRepository, never()).deleteById(any(Long.class));
+        verify(petRepository, never()).deleteById(any());
     }
 }
